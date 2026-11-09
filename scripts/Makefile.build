@@ -29,6 +29,7 @@ ccflags-y  :=
 rustflags-y :=
 cppflags-y :=
 ldflags-y  :=
+KBUILD_LDS_MODULE_ATTACH :=
 
 subdir-asflags-y :=
 subdir-ccflags-y :=
@@ -245,8 +246,11 @@ $(obj)/%.o: $(obj)/%.c $(recordmcount_source) FORCE
 cmd_mod = printf '%s\n' $(call real-search, $*.o, .o, -objs -y -m) | \
 	$(AWK) '!x[$$0]++ { print("$(obj)/"$$0) }' > $@
 
+cmd_mod_lds = $(if $(KBUILD_LDS_MODULE_ATTACH), cat $(srctree)/$(src)/$(firstword $(KBUILD_LDS_MODULE_ATTACH)) > $(@:.mod=.lds))
+
 $(obj)/%.mod: FORCE
 	$(call if_changed,mod)
+	$(call cmd,mod_lds)
 
 quiet_cmd_cc_lst_c = MKLST   $@
       cmd_cc_lst_c = $(CC) $(c_flags) -g -c -o $*.o $< && \
