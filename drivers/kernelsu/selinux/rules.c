@@ -161,6 +161,13 @@ void apply_kernelsu_rules()
     // Allow system server kill su process
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "getpgid");
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");
+    ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "setsched");
+
+    // Allow the QTI perf HAL to read su processes in /proc
+    ksu_allow(db, "vendor_hal_perf_default", KERNEL_SU_DOMAIN, "dir", "search");
+    ksu_allow(db, "vendor_hal_perf_default", KERNEL_SU_DOMAIN, "file", "read");
+    ksu_allow(db, "vendor_hal_perf_default", KERNEL_SU_DOMAIN, "file", "open");
+    ksu_allow(db, "vendor_hal_perf_default", KERNEL_SU_DOMAIN, "file", "getattr");
 
     // Return value ignored: the policy is published either way.
     ksu_policydb_fixup_len(db, "apply_kernelsu_rules");
