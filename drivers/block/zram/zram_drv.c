@@ -465,6 +465,7 @@ struct zram_wb_req {
 
 struct zram_prefetch_ctl {
 	atomic_t num_inflight;
+	atomic64_t processed_bytes;
 	wait_queue_head_t done_wait;
 };
 
@@ -1173,7 +1174,8 @@ static void zram_deferred_prefetch(struct work_struct *w)
 	struct zram *zram = req->zram;
 	u32 index = req->index;
 
-	zram_populate_table(zram, page, index);
+	if (zram_populate_table(zram, page, index) == 0)
+		atomic64_add(PAGE_SIZE, &req->pf_ctl->processed_bytes);
 
 	__free_page(page);
 	bio_put(req->bio);
@@ -1238,7 +1240,8 @@ static int zram_prefetch_from_bdev(struct zram *zram, struct page *page,
 	return 0;
 }
 
-int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl)
+int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl,
+			u64 *read_bytes)
 {
 	struct zram_pp_slot *pps;
 	struct zram_prefetch_ctl pf_ctl;
@@ -1248,6 +1251,7 @@ int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl)
 	struct page *page = NULL;
 
 	atomic_set(&pf_ctl.num_inflight, 0);
+	atomic64_set(&pf_ctl.processed_bytes, 0);
 	init_waitqueue_head(&pf_ctl.done_wait);
 
 	while ((pps = select_pp_slot(ctl))) {
@@ -1290,6 +1294,7 @@ unlock_next:
 		__free_page(page);
 
 	wait_event(pf_ctl.done_wait, atomic_read(&pf_ctl.num_inflight) == 0);
+	*read_bytes = atomic64_read(&pf_ctl.processed_bytes);
 	return ret;
 }
 
@@ -1391,6 +1396,9 @@ next:
 	 */
 	if (req)
 		release_wb_req(req);
+
+	if (blk_idx != INVALID_BDEV_BLOCK)
+		zram_release_bdev_block(zram, blk_idx);
 
 	while (atomic_read(&wb_ctl->num_inflight) > 0) {
 		wait_event(wb_ctl->done_wait, !list_empty(&wb_ctl->done_reqs));
@@ -2435,6 +2443,8 @@ static int read_from_zspool_raw(struct zram *zram, struct page *page, u32 index)
 	src = zs_map_object(zram->mem_pool, handle, ZS_MM_RO);
 	memcpy_to_page(page, 0, src, size);
 	zs_unmap_object(zram->mem_pool, handle);
+
+	memzero_page(page, size, PAGE_SIZE - size);
 
 	return 0;
 }

@@ -50,7 +50,7 @@ const PROT_MASK: usize = PROT_EXEC | PROT_READ | PROT_WRITE;
 mod ashmem_shrinker;
 
 mod ashmem_range;
-use ashmem_range::{Area, AshmemGuard, NewRange, ASHMEM_MUTEX, LRU_COUNT};
+use ashmem_range::{Area, AshmemGuard, NewRange, ASHMEM_MUTEX};
 
 mod shmem;
 use shmem::ShmemFile;
@@ -278,6 +278,8 @@ impl MiscDevice for AshmemMisc {
             bindings::ASHMEM_GET_PROT_MASK => me.get_prot_mask(),
             bindings::ASHMEM_GET_FILE_ID => me.get_file_id(UserSlice::new(arg, size).writer()),
             ASHMEM_PIN | ASHMEM_UNPIN | ASHMEM_GET_PIN_STATUS => {
+                // ASHMEM_GET_PIN_STATUS is _IO(), so _IOC_SIZE(cmd) is 0.
+                let size = core::mem::size_of::<bindings::ashmem_pin>();
                 me.pin_unpin(cmd, UserSlice::new(arg, size).reader())
             }
             bindings::ASHMEM_PURGE_ALL_CACHES => me.purge_all_caches(),
@@ -499,10 +501,11 @@ impl Ashmem {
             return Err(EPERM);
         }
         let mut guard = AshmemGuard(ASHMEM_MUTEX.lock());
-        let total_num_pages = LRU_COUNT.load(Ordering::Relaxed);
-        let _num_freed = guard.free_lru(usize::MAX);
+        let total_num_pages = guard.lru_count();
+        let _num_freed = guard.free_lru(None);
         // ASHMEM_PURGE_ALL_CACHES returns the total number of pages even if we stopped early.
-        Ok(isize::try_from(total_num_pages).unwrap_or(isize::MAX))
+        // Cap at `c_int::MAX` since `vfs_ioctl` truncates the return value to `c_int`.
+        Ok(u128::min(total_num_pages, c_int::MAX as u128) as isize)
     }
 }
 
